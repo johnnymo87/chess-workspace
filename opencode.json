@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "chess": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "--from",
+        "git+https://github.com/danilop/chess-support-mcp.git",
+        "chess-support-mcp"
+      ],
+      "enabled": true
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "external_directory": "allow"
+  }
+}
