@@ -6,7 +6,7 @@
       "command": [
         "uvx",
         "--from",
-        "git+https://github.com/danilop/chess-support-mcp.git",
+        "git+https://github.com/johnnymo87/chess-support-mcp.git@enriched-status",
         "chess-support-mcp"
       ],
       "enabled": true
