@@ -5,7 +5,9 @@ description: Use when a chess analysis session hits a gap in chess-support-mcp (
 
 # Improving the Fact Server
 
-`chess-support-mcp` is doing ~70% of the job. This skill is the standing list of gaps between what the research brief (`/tmp/research-chess-reasoning-aids-answer.md`) said we need and what the upstream MCP actually exposes. It exists so that a future session can quickly see what's been considered, what's been decided, and what would be worth actually implementing.
+`chess-support-mcp` is the fact server. This skill is the standing list of gaps between what the research brief (`/tmp/research-chess-reasoning-aids-answer.md`) said we need and what the MCP actually exposes. It exists so that a future session can quickly see what's been considered, what's been decided, and what would be worth actually implementing.
+
+We run a fork (`github.com/johnnymo87/chess-support-mcp`, branch `enriched-status`) that closes gaps 1, 2, and 4. `opencode.json` already points at it. Open gaps are 3 (SAN input) and 5 (undo/simulate).
 
 ## The hard constraint
 
@@ -17,27 +19,23 @@ See `../../AGENTS.md` and the research answer for the philosophical reasoning. I
 
 Ranked roughly by leverage (how much each would have helped real sessions). Verify the current state of the upstream tool before acting — the toolset listed in `../../AGENTS.md` is what we actually have.
 
-### 1. No `legal_moves` in `get_status`  — HIGH LEVERAGE
+### 1. Legal-move enumeration — DONE (2026-04-19)
 
-**What's missing:** `get_status` returns FEN + `pieces` + check flags, but not the list of legal moves in the current position.
+`list_legal_moves_detailed` tool now returns `[{uci, san}, ...]` sorted by UCI. Shipped on the fork branch `enriched-status` of `johnnymo87/chess-support-mcp`; `opencode.json` points there.
 
-**Why it matters:** This is the single highest-leverage change in the research answer. Without a legal-move list, the LLM generates candidates from imagination and validates them one by one with `is_legal`. That works but leaves a gap where the LLM forgets to validate and hallucinates.
+Design rationale: [`docs/plans/2026-04-19-enriched-status-design.md`](../../../docs/plans/2026-04-19-enriched-status-design.md) §"New tool: list_legal_moves_detailed".
 
-**What we want:** A `legal_moves_uci` and `legal_moves_san` field in `get_status` (or a dedicated `list_legal_moves` tool). Cost: trivial — python-chess has `board.legal_moves` and `board.san(move)`.
+### 2. Pins / checkers / attackers — DONE (2026-04-19)
 
-**Status:** Not in upstream. Worth a PR to `danilop/chess-support-mcp`, or a local fork.
+`get_status` now returns `absolute_pins` and `checkers`. New tool `get_attackers_to(square)` exposes the static attack map. Same fork branch.
 
-### 2. No pins / checkers / attackers derivation  — HIGH LEVERAGE
+Caveats baked into the design:
+- `absolute_pins` is absolute-only (pinned-to-king). Relative pins (through queen/rook) are out of scope; would be a separate field if ever wanted.
+- `get_attackers_to` is the *static* attack map: pinned pieces still count as attackers, and x-ray through the king is not modeled. The tool's docstring makes this explicit; don't use it as a legality oracle.
 
-**What's missing:** No `pinned_white`, `pinned_black`, `checkers`, `attackers_to_square`.
+Design rationale: same design doc, §"Surface changes".
 
-**Why it matters:** These are exactly the fields that would have caught the original motivating bugs (pinned-Nd2, Bxa2-off-diagonal). Calling `is_legal` catches illegality after the fact; exposing pins lets the LLM see the constraint up front.
-
-**What we want:** python-chess has `board.pin(square)`, `board.attackers(color, square)`, `board.checkers()`. A pair of tools (`get_pins`, `get_attackers_to`) or a single enriched-status tool would do it.
-
-**Status:** Not in upstream. Same fix path as (1).
-
-### 3. No SAN input — MEDIUM LEVERAGE
+### 3. No SAN input — MEDIUM LEVERAGE, OPEN
 
 **What's missing:** `add_move` takes UCI only; a PGN or SAN move list must be hand-converted by the LLM.
 
@@ -45,17 +43,11 @@ Ranked roughly by leverage (how much each would have helped real sessions). Veri
 
 **What we want:** Either make `add_move` accept SAN, or add a sibling `add_move_san`, or a `load_pgn(pgn_string)` that replays the whole game server-side.
 
-**Status:** Not in upstream. `load_pgn` is probably the highest-leverage version — one tool call instead of 40.
+**Status:** Not implemented. `load_pgn` is probably the highest-leverage version — one tool call instead of 40. Would be the obvious next PR to the fork.
 
-### 4. No material count — LOW LEVERAGE
+### 4. Material count — DONE (2026-04-19)
 
-**What's missing:** No piece-count summary.
-
-**Why it matters:** Easy to count by hand from `pieces`, but the LLM makes arithmetic errors under load. Cheap to provide.
-
-**What we want:** `material: {white: {Q:n,R:n,B:n,N:n,P:n}, black: {...}}` in status. Trivial.
-
-**Status:** Not in upstream. Bundle with (1) and (2) in a single "enriched status" PR.
+`get_status` now includes `material` (per-color piece counts, kings excluded, uncapped for promotions) and `material_diff` (per-piece `white[k] - black[k]`). Same fork branch.
 
 ### 5. No simulate / undo — MEDIUM LEVERAGE, HIGH COMPLEXITY
 
@@ -82,25 +74,16 @@ Ranked roughly by leverage (how much each would have helped real sessions). Veri
 
 ## How to act on this
 
-Three paths, in order of preference:
+Work on the fork: `github.com/johnnymo87/chess-support-mcp`, branch `enriched-status`. Local checkout at `/home/dev/projects/chess-support-mcp`. `opencode.json` already points there.
 
-### Path A: PR upstream
+TDD is the expected workflow (see the existing commits on the branch for style). Each new field or tool:
 
-`danilop/chess-support-mcp` is small (~5 commits as of last check) and the maintainer's stated philosophy matches ours. An "enriched status" PR bundling gaps 1, 2, 4 would be small and low-risk. Worth trying first.
+1. Write the failing test against the stdio MCP client (mirror the style in `tests/test_chess_support_mcp.py`).
+2. Implement the smallest change in `src/chess_support_mcp/server.py` that makes it pass.
+3. Run `uv run pytest -q` — full suite should stay green.
+4. Commit. Push to the `enriched-status` branch.
 
-### Path B: Local fork
-
-If upstream doesn't respond or diverges, fork and update `opencode.json`:
-
-```json
-"command": ["uvx", "--from", "git+https://github.com/<fork>/chess-support-mcp.git", "chess-support-mcp"]
-```
-
-All the python-chess primitives are already in the upstream's dependencies. Changes are ~50 lines of Python.
-
-### Path C: Thin wrapper MCP
-
-Write a sibling MCP server that wraps `chess-support-mcp` and adds the missing derivations. Higher complexity, no benefit over (B).
+Restart OpenCode to pick up the new server binary (or run `uvx --refresh --from 'git+...@enriched-status' chess-support-mcp --help` to warm the cache first).
 
 ## What NOT to add
 
@@ -120,3 +103,4 @@ These all turn the MCP into a second intelligence in the loop, which is exactly 
 
 - **2026-04-19:** Initial gap inventory. No changes committed yet. Decided to document first, implement second — a session that hits a gap in real use will have better intuition about priority than a speculative implementation would.
 - **2026-04-19:** Pre-compaction handoff. A plan for closing the top-priority gaps lives at [`docs/plans/2026-04-19-fact-server-gaps.md`](../../../docs/plans/2026-04-19-fact-server-gaps.md). Next session should read that plan before implementing anything.
+- **2026-04-19:** Gaps 1, 2, 4 implemented on the fork. Design at [`docs/plans/2026-04-19-enriched-status-design.md`](../../../docs/plans/2026-04-19-enriched-status-design.md), 13-task plan at [`docs/plans/2026-04-19-enriched-status-plan.md`](../../../docs/plans/2026-04-19-enriched-status-plan.md). Fork `github.com/johnnymo87/chess-support-mcp` branch `enriched-status`; 7 commits atop upstream `f75662d`. End-to-end validation against the motivating PGN passed all 9 assertions (absolute pin of Nd2 by Bh6 detected correctly, material diff, legal-moves enumeration). Decided to stay on the fork indefinitely rather than PR upstream — the fork is our runtime and nothing forces the decision. Gaps 3 (SAN input / `load_pgn`) and 5 (undo/simulate) remain open and are the obvious next candidates.

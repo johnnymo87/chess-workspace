@@ -1,6 +1,13 @@
 # Plan: Close the biggest gaps in `chess-support-mcp`
 
-**Status:** Not started. Documentation complete; implementation deferred across compaction boundary.
+**Status:** Superseded for gaps 1, 2, 4 by the enriched-status work — see
+[`2026-04-19-enriched-status-design.md`](2026-04-19-enriched-status-design.md)
+and [`2026-04-19-enriched-status-plan.md`](2026-04-19-enriched-status-plan.md).
+Implemented on fork branch `github.com/johnnymo87/chess-support-mcp@enriched-status`.
+Gaps 3 (SAN input / `load_pgn`) and 5 (undo/simulate) are still open and
+would be the natural next targets for the same fork.
+
+The original pre-compaction plan text follows for historical reference.
 
 **Created:** 2026-04-19, at the end of a session that (a) successfully analyzed a real game position using the current MCP, (b) wrote project-local skills documenting the workspace, and (c) enumerated gaps in the fact server.
 

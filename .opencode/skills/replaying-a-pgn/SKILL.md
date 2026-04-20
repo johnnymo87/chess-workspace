@@ -46,14 +46,14 @@ These are the moves most likely to trip you up in a replay:
 
 1. `chess_create_or_reset_game`.
 2. Take the PGN, split by move number, and mentally walk through it once before firing any tool call. For long openings, you probably remember the UCI for the first 5–10 moves — those can batch.
-3. For any move where you're not 100% sure, write the UCI next to the SAN *before* calling the tool.
+3. For any move where you're not 100% sure, write the UCI next to the SAN *before* calling the tool. If you want to sanity-check a candidate UCI before applying, call `chess_list_legal_moves_detailed` and confirm your `{uci, san}` pair appears in the result.
 4. Fire a batch (≤5 moves). Then call `chess_get_status` and check `last_move_san` matches the SAN for that ply. If it doesn't, stop and diagnose.
 5. Repeat until you've reached the analysis position.
 6. Final check before analysis: `chess_list_moves_detailed` — compare the full SAN list against the PGN. They should match ply-for-ply.
 7. Hand off to `analyzing-a-position`.
 
-## Why this isn't fixed upstream
+## Why this isn't fixed yet
 
-`chess-support-mcp` could accept SAN directly (python-chess has `board.parse_san()`), which would eliminate nearly all of this pain. A `chess_load_pgn` tool that takes the whole PGN and replays it server-side would eliminate even more. Both are tracked in `improving-the-fact-server`.
+`chess-support-mcp` could accept SAN directly (python-chess has `board.parse_san()`), which would eliminate nearly all of this pain. A `chess_load_pgn` tool that takes the whole PGN and replays it server-side would eliminate even more. Both are tracked in `improving-the-fact-server` as open gap #3 — the obvious next candidate for an addition to the fork.
 
 Until then: batch small, verify after each batch, and don't trust your head.

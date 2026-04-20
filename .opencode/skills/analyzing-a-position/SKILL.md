@@ -19,45 +19,50 @@ Follow these steps in order. For a complex position, literally write the interme
 - Call `chess_board_ascii`.
 - **Do both.** The ASCII board catches geometry errors; the `pieces` map catches square-mixups. They're redundant on purpose.
 
-### 2. Count material by hand, once, and write it down
+### 2. Read material from `get_status`, then summarize it
 
-There is no `material` field in `get_status` (as of this writing — see `improving-the-fact-server`). Count from the `pieces` map. Write it as a line item in your response:
+`get_status` now returns `material` (per-color piece counts) and `material_diff` (per-piece white-minus-black). Copy those into your response verbatim; don't recount from `pieces`. Example:
 
 ```
-White: B + N + 2R + 7P = 16 + 7 = 23 (plus K)
-Black: Q + 2B + 2R + 6P = 22 + 6 = 28 (plus K)
-Black up ~5 points.
+material: white={Q:1,R:2,B:1,N:1,P:7}, black={Q:1,R:2,B:2,N:0,P:6}
+diff: {B:-1, N:+1, P:+1} → roughly even, White up ~1 pawn, with imbalanced minor pieces.
 ```
 
-Recount if you do anything non-trivial (imagined captures, line evaluation). Arithmetic drift is real.
+If you *do* want a point-value total, compute it once from the field (don't hallucinate one). But a human narrative of the imbalance ("up a knight, down a bishop, tied in pawns") is usually more useful than a single number.
 
-### 3. Enumerate threats, **per piece**, from the data
+### 3. Enumerate threats, **per square**, using `get_attackers_to`
 
-For the side not to move, list what each piece attacks. For the side to move, list what is hanging and what is attacked. **Don't speed-run this** — this is where errors hide.
+For each candidate target square (yours that might be hanging, or the opponent's that might be takeable), call `chess_get_attackers_to` and write down the full attacker/defender picture:
 
-For each candidate target square, list:
-- **Attackers** (with piece + color)
-- **Defenders** (with piece + color)
+```
+e5: white attackers = [{f3:N}], black attackers = []
+    → e5 is attacked by Nf3, no black defender, hanging if a piece sits there.
+```
 
-Do it explicitly. "The bishop on b5 is attacked by Qa5 and Rb7. It is defended by: nothing. It is hanging."
+**Read the docstring warning carefully:** `get_attackers_to` is the *static* attack map. Pinned pieces still count as attackers, and x-ray through the king is not modeled. So:
 
-If you're unsure whether piece X attacks square Y, you can reason it out from the `pieces` map (check the ray is unblocked for sliders, check the knight-jump table for knights). For sliding pieces, explicitly walk the ray square by square using the `pieces` map.
+- "Attacker exists" does NOT mean "the attacker can legally capture right now." A pinned attacker cannot actually move. To confirm a capture is legal, cross-check against `list_legal_moves_detailed`.
+- "No attacker" does NOT mean "safe forever" — an unpin or a tempo move might change the picture.
 
-### 4. Check pins before moving any non-king piece
+Used well, this is much faster than walking rays by hand and much less error-prone. Do it explicitly for every non-trivial target. Don't speed-run this — it's where errors hide.
 
-For every candidate move that is not a king move:
+### 4. Read `absolute_pins` from `get_status` before moving any non-king piece
 
-- Identify your king's square.
-- For each enemy sliding piece (Q, R, B), check whether there's a ray from that piece through your candidate piece to your king, with no other piece on the ray.
-- If yes, the piece is pinned. If it's an absolute pin, your candidate piece may only move along the pin ray.
+`get_status.absolute_pins` lists every absolutely-pinned piece (pinned to its own king), with the pin's ray squares ordered from king outward. Before proposing any candidate non-king move, check that square against `absolute_pins`. If the piece is pinned, the only legal moves for it are along the ray.
+
+**Important caveats:**
+
+- **Absolute pins only.** Relative pins (through the queen or a rook) are NOT reported. If you're worried about a piece being pinned to the queen, you must reason about it manually — walk the ray from the enemy slider through your piece and see what's behind it.
+- `list_legal_moves_detailed` is the ground truth. `absolute_pins` tells you *why* a piece's moves might be restricted, but `list_legal_moves_detailed` tells you *exactly what's legal*. Use them together — the pin field informs the plan, the legal-moves list verifies the execution.
 
 This was the failure mode that motivated the entire workspace (the pinned-Nd2 bug). Take it seriously.
 
-### 5. Verify the candidate move is legal
+### 5. Verify the candidate move appears in `list_legal_moves_detailed`
 
-- Call `chess_is_legal` on every candidate before recommending it.
-- Treat this as non-negotiable, not as a double-check. Your "obvious" moves are exactly the ones where you skip the verification.
-- If `is_legal` says false, figure out why before trying something else. The reason often reveals a tactical feature (pin, check, blocked square).
+- Call `chess_list_legal_moves_detailed` once per position you're analyzing. It returns every legal move as `{uci, san}`.
+- Look up each candidate. If a candidate move isn't in the list, it's illegal — figure out why (usually a pin, a check you missed, or a blocked square) before proposing something else.
+- This is cheaper and stronger than one-off `chess_is_legal` calls: you get the full menu, so you can also *discover* moves you wouldn't have considered.
+- Still use `chess_is_legal` if you want a binary check on a single move without enumerating the whole list — both work.
 
 ### 6. Only then, reason about the plan
 
@@ -67,9 +72,9 @@ This was the failure mode that motivated the entire workspace (the pinned-Nd2 bu
 
 ## Simulating lines
 
-If you want to see what a position looks like after a hypothetical move, the cheapest option is to just reason from the `pieces` map by mentally updating it. Your brain is fine at "remove piece from X, add to Y" — the errors come from the initial grounding, not from one-ply imagination.
+If you want to see what a position looks like after a hypothetical move, the cheapest option is to just reason from the `pieces` map and your `absolute_pins`/`material` snapshot by mentally updating it. Your brain is fine at "remove piece from X, add to Y" — the errors come from the initial grounding, not from one-ply imagination.
 
-**Avoid** calling `chess_add_move` to simulate, because there's no undo. To get back to the analysis position you'd have to `create_or_reset_game` and replay every ply. If you absolutely must play out a line on the board, do it at the end of your analysis, not mid-reasoning. (See `improving-the-fact-server` — a `simulate_move` / undo capability is on the wishlist.)
+**Avoid** calling `chess_add_move` to simulate, because there's no undo. To get back to the analysis position you'd have to `create_or_reset_game` and replay every ply. If you absolutely must play out a line on the board, do it at the end of your analysis, not mid-reasoning. (See `improving-the-fact-server` — undo/simulate is an open gap, tracked as #5.)
 
 ## Output shape for advice
 
@@ -85,6 +90,8 @@ A good analysis response has this structure:
 
 - **"Let me just quickly check…"** — quickly always means in-head. Use the tools.
 - **Reasoning about a move without naming its source and destination squares** — if you can't write "Nc4 → a5" you'll mix up knights.
-- **"The bishop defends this" without checking the diagonal** — walk the ray square by square.
-- **Counting material from memory of the captures** — count from the current `pieces` map. Captures accumulate errors; current state doesn't.
+- **"The bishop defends this" without `get_attackers_to`** — call the tool. Walking rays by hand is the error-prone path `get_attackers_to` replaces.
+- **Reading `get_attackers_to` as a legality oracle** — it's the static attack map. Pinned attackers still appear. If you care whether a capture is legal, look it up in `list_legal_moves_detailed`.
+- **Recounting material from memory** — `material` and `material_diff` are fields in `get_status`. Read them.
+- **Assuming `absolute_pins == []` means no pins at all** — it means no pins to the king. A piece can still be relatively pinned to the queen or rook. For those, you still have to reason manually.
 - **Batching `chess_add_move` calls in parallel during analysis** — if one fails all subsequent fail (wrong side-to-move). See `replaying-a-pgn`.
