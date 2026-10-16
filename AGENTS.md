@@ -15,13 +15,13 @@ Reasoning and sources:
 
 ## Skills (TOC)
 
-Project-local skills live in `.opencode/skills/` and are the primary source of truth for how to do things in this workspace. They're auto-discovered when OpenCode runs from this directory — no build step, no registration.
+Project-local skills live in `.agents/skills/` and are the primary source of truth for how to do things in this workspace. They're auto-discovered when OpenCode runs from this directory — no build step, no registration.
 
 | Skill | Use when |
 |---|---|
-| [`replaying-a-pgn`](.opencode/skills/replaying-a-pgn/SKILL.md) | Setting up the MCP game state from a SAN PGN, before analysis. |
-| [`analyzing-a-position`](.opencode/skills/analyzing-a-position/SKILL.md) | Reasoning about the current position to advise a player. |
-| [`improving-the-fact-server`](.opencode/skills/improving-the-fact-server/SKILL.md) | Hitting a gap in `chess-support-mcp` and considering whether to plug it. |
+| [`replaying-a-pgn`](.agents/skills/replaying-a-pgn/SKILL.md) | Setting up the MCP game state from a SAN PGN, before analysis. |
+| [`analyzing-a-position`](.agents/skills/analyzing-a-position/SKILL.md) | Reasoning about the current position to advise a player. |
+| [`improving-the-fact-server`](.agents/skills/improving-the-fact-server/SKILL.md) | Hitting a gap in `chess-support-mcp` and considering whether to plug it. |
 
 Typical analysis session: `replaying-a-pgn` → `analyzing-a-position`. The third is consulted only when a gap becomes painful.
 
